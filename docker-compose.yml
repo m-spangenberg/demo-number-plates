@@ -1,0 +1,55 @@
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: number_plates
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d number_plates"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  go-api:
+    build:
+      context: .
+      dockerfile: ./services/go-api/Dockerfile
+    container_name: go-api
+    ports:
+      - "8081:8081"
+    environment:
+      - API_KEYS=demo-key
+      - DATA_DIR=/data
+      - REDIS_ADDR=redis:6379
+      - POSTGRES_ADDR=postgres:5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data:ro
+      - api-data:/app/data
+
+volumes:
+  redis-data:
+  postgres-data:
+  api-data:
