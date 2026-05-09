@@ -195,7 +195,7 @@ read: https://en.wikipedia.org/wiki/Trie
 
 ## Seed Data Generation
 
-I made two scripts to generate the standard and vanity seed data. You can find them in the `scripts` directory. The standard plate generator still needs to be updated to use a weighted clustered-fill technique.
+I made two scripts to generate the standard and vanity seed data. You can find them in the `scripts` directory. The standard plate generator still needs to be updated to use a weighted clustered-fill technique. For now, you can run the scripts to generate your own data before spinning up the demo:
 
 ```bash
 uv run generate-standard-data.py
@@ -203,4 +203,168 @@ uv run generate-standard-data.py
 
 uv run generate-vanity-data.py
 # Generated 131104 vanity plates.
+```
+
+## Build And Run
+
+The API imports the pre-generated data files from `./data/standard_plates.txt` and `./data/vanity_plates.txt` into PostgreSQL on first startup, then builds the Redis Bloom filter, standard plate bitmaps, and vanity trie before the service becomes ready.
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+- curl
+
+### Start The Demo
+
+```bash
+docker compose up -d --build
+```
+
+### Check Service Status
+
+The API is only ready after the PostgreSQL import and Redis index build complete.
+
+```bash
+docker compose ps
+
+curl http://localhost:8081/healthz
+curl http://localhost:8081/readyz
+```
+
+Expected readiness response once startup is complete:
+
+```json
+{"status":"ready"}
+```
+
+To inspect startup progress:
+
+```bash
+docker compose logs -f go-api
+```
+
+You should see log lines similar to:
+
+```text
+startup step complete: postgres ping
+startup step complete: redis ping
+startup step complete: migrate schema
+startup step complete: import data
+startup step complete: build redis indexes
+application ready
+```
+
+## Test The REST API
+
+The lookup endpoints require an API key. The default key configured in `docker-compose.yml` is `demo-key`.
+
+### Standard Plate Lookup
+
+```bash
+curl -H 'X-API-Key: demo-key' \
+    'http://localhost:8081/find?t=std&q=432069W'
+```
+
+Expected result:
+
+```json
+{"input":"432069W","type":"standard","normalized":"N 432-069 W","available":false}
+```
+
+### Vanity Plate Lookup
+
+```bash
+curl -H 'X-API-Key: demo-key' \
+    'http://localhost:8081/find?t=vty&q=emyds'
+```
+
+Expected result:
+
+```json
+{"input":"emyds","type":"vanity","normalized":"EMYDS NA","available":false,"suggestions":["EMYD","EMYDE","EMYDEA","EMYDES","EMYDIAN"]}
+```
+
+### Invalid Request
+
+```bash
+curl -H 'X-API-Key: demo-key' \
+    'http://localhost:8081/find?t=std&q=INVALID'
+```
+
+Expected result:
+
+```json
+{"code":400,"message":"invalid standard plate format"}
+```
+
+### Missing API Key
+
+```bash
+curl 'http://localhost:8081/find?t=std&q=432069W'
+```
+
+Expected result:
+
+```json
+{"message":"missing or invalid API key"}
+```
+
+## Test The GraphQL API
+
+### Lookup Query: Standard Plate
+
+```bash
+curl \
+    -H 'Content-Type: application/json' \
+    -H 'X-API-Key: demo-key' \
+    -d '{"query":"query { lookupPlate(type: \"std\", query: \"432069W\") { available normalized type input } }"}' \
+    http://localhost:8081/graphql
+```
+
+Expected result:
+
+```json
+{
+    "data": {
+        "lookupPlate": {
+            "available": false,
+            "input": "432069W",
+            "normalized": "N 432-069 W",
+            "type": "standard"
+        }
+    }
+}
+```
+
+### Lookup Query: Vanity Plate
+
+```bash
+curl \
+    -H 'Content-Type: application/json' \
+    -H 'X-API-Key: demo-key' \
+    -d '{"query":"query { lookupPlate(type: \"vty\", query: \"s3cr3t\") { available normalized type input suggestions } }"}' \
+    http://localhost:8081/graphql
+```
+
+### Vanity Suggestions Query
+
+```bash
+curl \
+    -H 'Content-Type: application/json' \
+    -H 'X-API-Key: demo-key' \
+    -d '{"query":"query { suggestVanity(prefix: \"EMY\", limit: 5) }"}' \
+    http://localhost:8081/graphql
+```
+
+## Stop The Demo
+
+```bash
+docker compose down
+```
+
+To remove the PostgreSQL and Redis volumes as well:
+
+```bash
+docker compose down -v
 ```
