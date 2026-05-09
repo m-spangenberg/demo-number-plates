@@ -43,7 +43,6 @@ sequenceDiagram
 
 I decided to use **Golang** here because it will offer C-like performance and concurrent requests. **PostgreSQL** for the primary database that tracks relational integrity for plate ownership and an in-memory cach layer with **Redis**. This is all served using a **GraphQL** API, so the front-end is afforded more flexibility as functionality grows.
 
----
 ## Technical Details
 
 Namibian motor vehicle number plates come as standard and vanity types:
@@ -61,7 +60,6 @@ CREATE TABLE plates (
     id SERIAL PRIMARY KEY,
     plate_number VARCHAR(12) UNIQUE NOT NULL,
     plate_type ENUM('standard', 'vanity'),
-    town_code VARCHAR(3),
     is_reserved BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -69,7 +67,7 @@ CREATE TABLE plates (
 CREATE INDEX idx_plate_search ON plates (plate_number);
 ```
 
-For demo purposes, we will generate ~1M dummy registrations across the two types of plates using a mix of seed words and a weighted clustered-fill technique.
+For demo purposes, we will generate ~3M dummy registrations across the two types of plates using a mix of seed words and a weighted clustered-fill technique.
 
 > [! TIP] Demo Data
 > Assumptions:
@@ -194,3 +192,15 @@ sequenceDiagram
 ```
 
 read: https://en.wikipedia.org/wiki/Trie
+
+## Seed Data Generation
+
+I made two scripts to generate the standard and vanity seed data. You can find them in the `scripts` directory. The standard plate generator still needs to be updated to use a weighted clustered-fill technique.
+
+```bash
+uv run generate-standard-data.py
+# Generated 2880813 standard plates.
+
+uv run generate-vanity-data.py
+# Generated 131104 vanity plates.
+```
