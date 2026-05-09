@@ -1,0 +1,196 @@
+# demo-number-plates
+
+This is a system design repo demonstrating a solution to the problem of efficiently searching for the availability of standard and vanity number plates in Namibia.
+
+## Overview
+
+**Problem**: In Namibia, NaTIS allows drivers to register **standard** or **vanity** number plates. At the moment, their existing approach is non-optimal as it requires 3 nominations by the applicant and does not allow members of the public to freely query for availability.
+
+The problem space is interesting because it contains more than 78 billion possible combinations. For standard number plates, there are 42,999,957 possible combinations, assuming 1 is the lowest and 999-999 is the highest possible unique number for each of the 43 towns. For vanity plates, there are 78,364,164,096 possible combinations, if we assume a maximum of 7 case-insensitive alphanumeric (A-Z,9-0) characters.
+
+This demo is a technical proof of concept to produce the most efficient possible solution that allows members of the Namibian public to search for the availability of number plates with the following constraints: 
+
+- the service must support many thousands of concurrent requests.
+- results should be provided with the lowest possible latency.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant FE as Front End
+    participant API as API Endpoint
+
+    Note over User, API: Search Attempt 1: Standard Plate
+    User->>FE: Enters "N 818-818 W"
+    rect rgb(240, 240, 240)
+        Note right of FE: Sanitise Input
+    end
+    FE->>API: GET /find?t=std&q=818818
+    API-->>FE: Response: Not Available
+    FE-->>User: Display "Not Available"
+
+    Note over User, API: Search Attempt 2: Vanity Plate
+    User->>FE: Enters "JEFFREY NA"
+    rect rgb(240, 240, 240)
+        Note right of FE: Sanitise Input
+    end
+    FE->>API: GET /find?t=vty&q=jeffrey
+    API-->>FE: Response: Available
+    FE-->>User: Display "Available"
+```
+
+## Stack
+
+I decided to use **Golang** here because it will offer C-like performance and concurrent requests. **PostgreSQL** for the primary database that tracks relational integrity for plate ownership and an in-memory cach layer with **Redis**. This is all served using a **GraphQL** API, so the front-end is afforded more flexibility as functionality grows.
+
+---
+## Technical Details
+
+Namibian motor vehicle number plates come as standard and vanity types:
+
+**Standard** number plates start with the country's initial letter N, then up to 6 numbers from 0-9, and finally the town code, which can be up to 3 letters designating one of 43 possible towns the vehicle is registered in. It should be notes that plates do not start with 0 and those with 6 numbers have the first three and last three numbers separated by a hyphen as to remain easily legible. e.g., N 818-818 W.
+
+**Vanity** plates contain up to 7 alphanumeric characters and end with the country code NA. e.g., JEFFREY NA
+
+### Database
+
+Since there is no publicly accessible database provided by NaTIS, we simulate the data store by setting up a simple PostgreSQL to model the relationship between plates, their type, and status:
+
+```sql
+CREATE TABLE plates (
+    id SERIAL PRIMARY KEY,
+    plate_number VARCHAR(12) UNIQUE NOT NULL,
+    plate_type ENUM('standard', 'vanity'),
+    town_code VARCHAR(3),
+    is_reserved BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_plate_search ON plates (plate_number);
+```
+
+For demo purposes, we will generate ~1M dummy registrations across the two types of plates using a mix of seed words and a weighted clustered-fill technique.
+
+> [! TIP] Demo Data
+> Assumptions:
+> - 43 towns exist in the NaTIS vehicle registry
+> - 20% of the population owns or operates a vehicle
+> - Low numbered standard plates are prestigious (1-999)
+> - High numbered or patterned standard plates are novelty (888-888)
+> - Vanity plates make up 2% of registrations (increased cost as a barrier)
+
+### Validation
+
+Once the request hits the server, we need to do a server-side sanitation pass using Regex to normalise input (remove hyphens/spaces, uppercase), before hitting the logic layer:
+
+* **Standard:** `^[A-Z]\s\d{3}-\d{3}\s[A-Z]{1,3}$`
+* **Vanity:** `^[A-Z0-0]{1,7}\s[A-Z]{2}$`
+
+We check the provided arguments in the passed parameters for either `std` or `vty` and gate the input using the appropriate regex rules.
+
+### Bloom
+
+To prevent unnecessary database hits, we can check the in-memory (Redis) Bloom Filter for plates.
+
+* When a user types a plate, the system checks the Bloom Filter first.
+* If the filter says "No", the plate is **100% available**.
+* If the filter says "Yes", the plate is **probably** taken, and the system then performs a definitive check in Redis.
+
+read: https://en.wikipedia.org/wiki/Bloom_filter
+
+### Query Logic
+
+Standard Plates: Bitmaps
+
+Standard plates follow a strict `Country Code + 6 Digits + Town Code` format, so we can represent the availability of plates using a **Bitmap (Bitset)**. Each town code (e.g., "W" for Windhoek) gets a bitset of 1,000,000 bits (representing numbers 1 to 999-999). This is super efficient, because 1 million bits take up only ~125 KB of memory. 
+
+1. We extract the town code (`W`) to select the appropriate bitset of 1,000,000 bits from memory.
+2. We extract the serial number (`818818`) as a 32-bit integer.
+3. We perform a word index, to see where the serial is in memory: `818818 / 64 = 12794` This tells us the bit is contained in the 12,794th block (64-bit word) of the entire set.
+4. We confirm the bit position with `818818 % 64` = `2`. This tells us the bit we want is located at position 2 within that 64th word.
+5. We create a binary mask to make sure only the target bit is active, then perform a **Left Shift** (`1 << 2`) to apply a decimal mask of `4`.
+6. We then apply the mask using a **Bitwise AND** (`Word 12,794 & 4`). This isolates the specific bit and everything else becomes zero in the 64-bit word.
+7. Then to get the value, we apply a **Right Shift** (`>> 2`) to move the result bit back to the 0th position. This normalises the results, giving us either `0` (available), or `1` (not available).
+
+Even with 100 towns, the entire country’s standard plate availability fits in 12.5 MB of RAM and checking if a plate is available becomes a constant-time $O(1)$ operation because we perform two math operations and two bit manipulations.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Server as Server (Logic Layer)
+    participant BF as Redis (Bloom Filter | Fastest)
+    participant Bitmap as Redis (Standard Plate Bitmap | Fast)
+    participant DB as PostgreSQL (System of Record | Slow)
+    
+    Server->>BF: Is "N 818-818 W" taken?
+    
+    alt Bloom Filter returns NO
+        BF-->>Server: 100% Available
+    else Bloom Filter returns YES
+        Server->>Bitmap: O(1) Bit Shift check (Town Bitset)
+        Bitmap-->>Server: Return Bit Status (0 or 1)
+        Server->>DB: Definitive Lookup
+        DB-->>Server: Record Result
+    end
+```
+
+read: https://en.wikipedia.org/wiki/Bitmap
+
+Vanity Plates: Trie (Prefix Tree)
+
+Vanity plates are alphanumeric and variable in length. A **Trie** is the most efficient structure for searching these with a lookup of $O(k)$, where $k$ is the length of the plate (max 7).
+
+```mermaid
+graph LR
+    %% Define the states (nodes) of the trie
+    R((Root))
+    J((J))
+    JE((JE))
+    JEF((JEF))
+    JEFF((JEFF))
+    JEFFR((JEFFR))
+    JEFFRE((JEFFRE))
+    JEFFREY((JEFFREY*))
+    JEFFI((JEFFI))
+    JEFFIE((JEFFIE*))
+
+    %% Define the transitions (edges) and characters
+    R -- J --> J
+    J -- E --> JE
+    JE -- F --> JEF
+    JEF -- F --> JEFF
+    JEFF -- R --> JEFFR
+    JEFFR -- E --> JEFFRE
+    JEFFRE -- Y --> JEFFREY
+    JEFF -- I --> JEFFI
+    JEFFI -- E --> JEFFIE
+
+    %% Highlight end of word nodes (not strictly necessary with the asterisks, but can improve readability)
+    classDef endWord fill:#f9f,stroke:#333,stroke-width:2px;
+    class JEFFREY endWord
+    class JEFFIE endWord
+```
+
+Tries use more memory than Hash Maps, but they allow for way better prefix matching and "fuzzy" suggestions.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Server as Server (Logic Layer)
+    participant BF as Redis (Bloom Filter | Fastest)
+    participant Trie as Redis (Vanity Plate Trie | Fast)
+    participant DB as PostgreSQL (System of Record | Slow)
+
+    Server->>BF: Is "JEFFREY NA" taken?
+    
+    alt Bloom Filter returns NO
+        BF-->>Server: 100% Available
+    else Bloom Filter returns YES
+        Server->>Trie: O(k) Prefix Search
+        Trie-->>Server: Return Status + Fuzzy Matches
+        Server->>DB: Definitive Lookup (PostgreSQL)
+        DB-->>Server: Plate Record
+    end
+```
+
+read: https://en.wikipedia.org/wiki/Trie
