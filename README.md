@@ -4,7 +4,7 @@ This is a system design repo demonstrating a solution to the problem of efficien
 
 ## Overview
 
-In Namibia, NaTIS allows drivers to register **standard** or **vanity** number plates. Their existing approach requires 3 manual nominations by the applicant and does not allow members of the public to freely query for availability. This demo is a proof of concept to produce the most efficient possible solution that allows people to search for the availability oo number plates. 
+In Namibia, NaTIS allows drivers to register **standard** or **vanity** number plates. Their existing approach requires 3 manual nominations by the applicant and does not allow members of the public to freely query for availability. This demo is a proof of concept to produce the most efficient possible solution that allows people to search for available number plates. 
 
 ```mermaid
 sequenceDiagram
