@@ -54,14 +54,6 @@ I decided to use **Golang** here because it will offer C-like performance and co
 
 Since there is no publicly accessible database provided by NaTIS, we simulate the data store by setting up a simple PostgreSQL to model the relationship between plates, their type, and status. For demo purposes, we will generate ~3M dummy registrations across the two types of plates using a mix of seed words and a weighted clustered-fill technique.
 
-> [!TIP] Demo Data
-> Assumptions:
-> - 43 towns exist in the NaTIS vehicle registry
-> - 20% of the population owns or operates a vehicle
-> - Low numbered standard plates are prestigious (1-999)
-> - High numbered or patterned standard plates are novelty (888-888)
-> - Vanity plates make up 2% of registrations (increased cost as a barrier)
-
 ## Query Logic
 
 ### Validation
