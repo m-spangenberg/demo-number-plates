@@ -4,14 +4,7 @@ This is a system design repo demonstrating a solution to the problem of efficien
 
 ## Overview
 
-**Problem**: In Namibia, NaTIS allows drivers to register **standard** or **vanity** number plates. At the moment, their existing approach is non-optimal as it requires 3 nominations by the applicant and does not allow members of the public to freely query for availability.
-
-The problem space is interesting because it contains more than 78 billion possible combinations. For standard number plates, there are 42,999,957 possible combinations, assuming 1 is the lowest and 999-999 is the highest possible unique number for each of the 43 towns. For vanity plates, there are 78,364,164,096 possible combinations, if we assume a maximum of 7 case-insensitive alphanumeric (A-Z,9-0) characters.
-
-This demo is a technical proof of concept to produce the most efficient possible solution that allows members of the Namibian public to search for the availability of number plates with the following constraints: 
-
-- the service must support many thousands of concurrent requests.
-- results should be provided with the lowest possible latency.
+In Namibia, NaTIS allows drivers to register **standard** or **vanity** number plates. Their existing approach requires 3 manual nominations by the applicant and does not allow members of the public to freely query for availability. This demo is a proof of concept to produce the most efficient possible solution that allows people to search for the availability oo number plates. 
 
 ```mermaid
 sequenceDiagram
@@ -39,11 +32,13 @@ sequenceDiagram
     FE-->>User: Display "Available"
 ```
 
-## Stack
+### Constraints
 
-I decided to use **Golang** here because it will offer C-like performance and concurrent requests. **PostgreSQL** for the primary database that tracks relational integrity for plate ownership and an in-memory cach layer with **Redis**. This is all served using a **GraphQL** API, so the front-end is afforded more flexibility as functionality grows.
 
-## Technical Details
+- the service must support many thousands of concurrent requests.
+- results should be provided with the lowest possible latency.
+
+### Problem Space
 
 Namibian motor vehicle number plates come as standard and vanity types:
 
@@ -51,31 +46,23 @@ Namibian motor vehicle number plates come as standard and vanity types:
 
 **Vanity** plates contain up to 7 alphanumeric characters and end with the country code NA. e.g., JEFFREY NA
 
-### Database
+The problem space is interesting because it contains more than 78 billion possible combinations. For standard number plates, there are 42,999,957 possible combinations, assuming 1 is the lowest and 999-999 is the highest possible unique number for each of the 43 towns. For vanity plates, there are 78,364,164,096 possible combinations, if we assume a maximum of 7 case-insensitive alphanumeric (A-Z,9-0) characters.
 
-Since there is no publicly accessible database provided by NaTIS, we simulate the data store by setting up a simple PostgreSQL to model the relationship between plates, their type, and status:
+### Tech Stack
 
-```sql
-CREATE TABLE plates (
-    id SERIAL PRIMARY KEY,
-    plate_number VARCHAR(12) UNIQUE NOT NULL,
-    plate_type ENUM('standard', 'vanity'),
-    is_reserved BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+I decided to use **Golang** here because it will offer C-like performance and concurrent requests. **PostgreSQL** for the primary database that tracks relational integrity for plate ownership and an in-memory cach layer with **Redis**. This is all served using a **GraphQL** API, so the front-end is afforded more flexibility as functionality grows.
 
-CREATE INDEX idx_plate_search ON plates (plate_number);
-```
+Since there is no publicly accessible database provided by NaTIS, we simulate the data store by setting up a simple PostgreSQL to model the relationship between plates, their type, and status. For demo purposes, we will generate ~3M dummy registrations across the two types of plates using a mix of seed words and a weighted clustered-fill technique.
 
-For demo purposes, we will generate ~3M dummy registrations across the two types of plates using a mix of seed words and a weighted clustered-fill technique.
-
-> [! TIP] Demo Data
+> [!TIP] Demo Data
 > Assumptions:
 > - 43 towns exist in the NaTIS vehicle registry
 > - 20% of the population owns or operates a vehicle
 > - Low numbered standard plates are prestigious (1-999)
 > - High numbered or patterned standard plates are novelty (888-888)
 > - Vanity plates make up 2% of registrations (increased cost as a barrier)
+
+## Query Logic
 
 ### Validation
 
@@ -86,7 +73,7 @@ Once the request hits the server, we need to do a server-side sanitation pass us
 
 We check the provided arguments in the passed parameters for either `std` or `vty` and gate the input using the appropriate regex rules.
 
-### Bloom
+### Bloom Filters
 
 To prevent unnecessary database hits, we can check the in-memory (Redis) Bloom Filter for plates.
 
@@ -96,9 +83,7 @@ To prevent unnecessary database hits, we can check the in-memory (Redis) Bloom F
 
 read: https://en.wikipedia.org/wiki/Bloom_filter
 
-### Query Logic
-
-Standard Plates: Bitmaps
+### Standard Plates: Bitmaps (Bitsets)
 
 Standard plates follow a strict `Country Code + 6 Digits + Town Code` format, so we can represent the availability of plates using a **Bitmap (Bitset)**. Each town code (e.g., "W" for Windhoek) gets a bitset of 1,000,000 bits (representing numbers 1 to 999-999). This is super efficient, because 1 million bits take up only ~125 KB of memory. 
 
@@ -134,7 +119,7 @@ sequenceDiagram
 
 read: https://en.wikipedia.org/wiki/Bitmap
 
-Vanity Plates: Trie (Prefix Tree)
+### Vanity Plates: Trie (Prefix Tree)
 
 Vanity plates are alphanumeric and variable in length. A **Trie** is the most efficient structure for searching these with a lookup of $O(k)$, where $k$ is the length of the plate (max 7).
 
@@ -193,7 +178,9 @@ sequenceDiagram
 
 read: https://en.wikipedia.org/wiki/Trie
 
-## Seed Data Generation
+## Demo
+
+### Seed Data Generation
 
 I made two scripts to generate the standard and vanity seed data. You can find them in the `scripts` directory. The standard plate generator still needs to be updated to use a weighted clustered-fill technique. For now, you can run the scripts to generate your own data before spinning up the demo:
 
@@ -205,17 +192,9 @@ uv run generate-vanity-data.py
 # Generated 131104 vanity plates.
 ```
 
-## Build And Run
+### Build And Run
 
 The API imports the pre-generated data files from `./data/standard_plates.txt` and `./data/vanity_plates.txt` into PostgreSQL on first startup, then builds the Redis Bloom filter, standard plate bitmaps, and vanity trie before the service becomes ready.
-
-### Prerequisites
-
-- Docker
-- Docker Compose
-- curl
-
-### Start The Demo
 
 ```bash
 docker compose up -d --build
@@ -230,29 +209,21 @@ docker compose ps
 
 curl http://localhost:8081/healthz
 curl http://localhost:8081/readyz
-```
 
-Expected readiness response once startup is complete:
-
-```json
-{"status":"ready"}
+# {"status":"ready"}
 ```
 
 To inspect startup progress:
 
 ```bash
 docker compose logs -f go-api
-```
 
-You should see log lines similar to:
-
-```text
-startup step complete: postgres ping
-startup step complete: redis ping
-startup step complete: migrate schema
-startup step complete: import data
-startup step complete: build redis indexes
-application ready
+# startup step complete: postgres ping
+# startup step complete: redis ping
+# startup step complete: migrate schema
+# startup step complete: import data
+# startup step complete: build redis indexes
+# application ready
 ```
 
 ## Test The REST API
@@ -264,12 +235,8 @@ The lookup endpoints require an API key. The default key configured in `docker-c
 ```bash
 curl -H 'X-API-Key: demo-key' \
     'http://localhost:8081/find?t=std&q=432069W'
-```
 
-Expected result:
-
-```json
-{"input":"432069W","type":"standard","normalized":"N 432-069 W","available":false}
+# {"input":"432069W","type":"standard","normalized":"N 432-069 W","available":false}
 ```
 
 ### Vanity Plate Lookup
@@ -277,12 +244,8 @@ Expected result:
 ```bash
 curl -H 'X-API-Key: demo-key' \
     'http://localhost:8081/find?t=vty&q=emyds'
-```
 
-Expected result:
-
-```json
-{"input":"emyds","type":"vanity","normalized":"EMYDS NA","available":false,"suggestions":["EMYD","EMYDE","EMYDEA","EMYDES","EMYDIAN"]}
+# {"input":"emyds","type":"vanity","normalized":"EMYDS NA","available":false,"suggestions":["EMYD","EMYDE","EMYDEA","EMYDES","EMYDIAN"]}
 ```
 
 ### Invalid Request
@@ -290,24 +253,16 @@ Expected result:
 ```bash
 curl -H 'X-API-Key: demo-key' \
     'http://localhost:8081/find?t=std&q=INVALID'
-```
 
-Expected result:
-
-```json
-{"code":400,"message":"invalid standard plate format"}
+# {"code":400,"message":"invalid standard plate format"}
 ```
 
 ### Missing API Key
 
 ```bash
 curl 'http://localhost:8081/find?t=std&q=432069W'
-```
 
-Expected result:
-
-```json
-{"message":"missing or invalid API key"}
+# {"message":"missing or invalid API key"}
 ```
 
 ## Test The GraphQL API
@@ -320,21 +275,17 @@ curl \
     -H 'X-API-Key: demo-key' \
     -d '{"query":"query { lookupPlate(type: \"std\", query: \"432069W\") { available normalized type input } }"}' \
     http://localhost:8081/graphql
-```
 
-Expected result:
-
-```json
-{
-    "data": {
-        "lookupPlate": {
-            "available": false,
-            "input": "432069W",
-            "normalized": "N 432-069 W",
-            "type": "standard"
-        }
-    }
-}
+# {
+#     "data": {
+#         "lookupPlate": {
+#             "available": false,
+#             "input": "432069W",
+#             "normalized": "N 432-069 W",
+#             "type": "standard"
+#         }
+#     }
+# }
 ```
 
 ### Lookup Query: Vanity Plate
@@ -345,9 +296,21 @@ curl \
     -H 'X-API-Key: demo-key' \
     -d '{"query":"query { lookupPlate(type: \"vty\", query: \"s3cr3t\") { available normalized type input suggestions } }"}' \
     http://localhost:8081/graphql
+
+# {
+# "data": {
+# "lookupPlate": {
+# "available": true,
+# "input": "s3cr3t",
+# "normalized": "S3CR3T NA",
+# "suggestions": [],
+# "type": "vanity"
+# }
+# }
+# }
 ```
 
-### Vanity Suggestions Query
+### Lookup Query: Vanity Suggestions Query
 
 ```bash
 curl \
