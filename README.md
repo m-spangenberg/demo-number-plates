@@ -90,16 +90,6 @@ read: https://en.wikipedia.org/wiki/Bloom_filter
 
 Standard plates follow a strict `Country Code + 6 Digits + Town Code` format, so we can represent the availability of plates using a **Bitmap (Bitset)**. Each town code (e.g., "W" for Windhoek) gets a bitset of 1,000,000 bits (representing numbers 1 to 999-999). This is super efficient, because 1 million bits take up only ~125 KB of memory. 
 
-1. We extract the town code (`W`) to select the appropriate bitset of 1,000,000 bits from memory.
-2. We extract the serial number (`818818`) as a 32-bit integer.
-3. We perform a word index, to see where the serial is in memory: `818818 / 64 = 12794` This tells us the bit is contained in the 12,794th block (64-bit word) of the entire set.
-4. We confirm the bit position with `818818 % 64` = `2`. This tells us the bit we want is located at position 2 within that 64th word.
-5. We create a binary mask to make sure only the target bit is active, then perform a **Left Shift** (`1 << 2`) to apply a decimal mask of `4`.
-6. We then apply the mask using a **Bitwise AND** (`Word 12,794 & 4`). This isolates the specific bit and everything else becomes zero in the 64-bit word.
-7. Then to get the value, we apply a **Right Shift** (`>> 2`) to move the result bit back to the 0th position. This normalises the results, giving us either `0` (available), or `1` (not available).
-
-Even with 100 towns, the entire country’s standard plate availability fits in 12.5 MB of RAM and checking if a plate is available becomes a constant-time $O(1)$ operation because we perform two math operations and two bit manipulations.
-
 ```mermaid
 sequenceDiagram
     autonumber
@@ -119,6 +109,16 @@ sequenceDiagram
         DB-->>Server: Record Result
     end
 ```
+
+1. We extract the town code (`W`) to select the appropriate bitset of 1,000,000 bits from memory.
+2. We extract the serial number (`818818`) as a 32-bit integer.
+3. We perform a word index, to see where the serial is in memory: `818818 / 64 = 12794` This tells us the bit is contained in the 12,794th block (64-bit word) of the entire set.
+4. We confirm the bit position with `818818 % 64` = `2`. This tells us the bit we want is located at position 2 within that 64th word.
+5. We create a binary mask to make sure only the target bit is active, then perform a **Left Shift** (`1 << 2`) to apply a decimal mask of `4`.
+6. We then apply the mask using a **Bitwise AND** (`Word 12,794 & 4`). This isolates the specific bit and everything else becomes zero in the 64-bit word.
+7. Then to get the value, we apply a **Right Shift** (`>> 2`) to move the result bit back to the 0th position. This normalises the results, giving us either `0` (available), or `1` (not available).
+
+Even with 100 towns, the entire country’s standard plate availability fits in 12.5 MB of RAM and checking if a plate is available becomes a constant-time $O(1)$ operation because we perform two math operations and two bit manipulations.
 
 read: https://en.wikipedia.org/wiki/Bitmap
 
@@ -337,17 +337,13 @@ docker compose down -v
 
 ## Benchmarking
 
-The repo includes a benchmark harness in `./benchmark` that constrains the stack to a production-like shape and generates a Markdown summary for each run.
-
 ### Benchmark Profile
 
-The benchmark compose override applies these limits:
+The benchmark compose override applies these limits and increases the API key rate limit during benchmark.
 
 - `go-api`: `1 vCPU`, `512MB RAM`
 - `postgres`: `1 vCPU`, `1GB RAM`
 - `redis`: `0.5 vCPU`, `256MB RAM`
-
-It also increases the API key rate limit during benchmark runs so the limiter does not dominate the results.
 
 ### Benchmark Scenarios
 
@@ -357,8 +353,6 @@ It also increases the API key rate limit during benchmark runs so the limiter do
 - `graphql-standard`: GraphQL standard plate lookups
 
 ### Run A Benchmark
-
-Default run: mixed workload, `30m`, `120 req/s`.
 
 ```bash
 # Run a specific scenario with custom duration and rate:
