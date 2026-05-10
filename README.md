@@ -11,24 +11,43 @@ sequenceDiagram
     autonumber
     actor User
     participant FE as Front End
-    participant API as API Endpoint
+    participant REST as REST API
+    participant GQL as GraphQL API
 
-    Note over User, API: Search Attempt 1: Standard Plate
+    Note over User, GQL: Search Attempt 1: Standard Plate via REST
     User->>FE: Enters "N 818-818 W"
     rect rgb(240, 240, 240)
         Note right of FE: Sanitise Input
     end
-    FE->>API: GET /find?t=std&q=818818
-    API-->>FE: Response: Not Available
+    FE->>REST: GET /find?t=std&q=818818
+    REST-->>FE: JSON Response: Not Available
     FE-->>User: Display "Not Available"
 
-    Note over User, API: Search Attempt 2: Vanity Plate
+    Note over User, GQL: Search Attempt 2: Standard Plate via GraphQL
+    User->>FE: Enters "N 818-818 W"
+    rect rgb(240, 240, 240)
+        Note right of FE: Sanitise Input
+    end
+    FE->>GQL: query { lookupPlate(type: "std", query: "818818W") }
+    GQL-->>FE: GraphQL Response: Not Available
+    FE-->>User: Display "Not Available"
+
+    Note over User, GQL: Search Attempt 3: Vanity Plate via REST
     User->>FE: Enters "JEFFREY NA"
     rect rgb(240, 240, 240)
         Note right of FE: Sanitise Input
     end
-    FE->>API: GET /find?t=vty&q=jeffrey
-    API-->>FE: Response: Available
+    FE->>REST: GET /find?t=vty&q=jeffrey
+    REST-->>FE: JSON Response: Available
+    FE-->>User: Display "Available"
+
+    Note over User, GQL: Search Attempt 4: Vanity Plate via GraphQL
+    User->>FE: Enters "JEFFREY NA"
+    rect rgb(240, 240, 240)
+        Note right of FE: Sanitise Input
+    end
+    FE->>GQL: query { lookupPlate(type: "vty", query: "jeffrey") }
+    GQL-->>FE: GraphQL Response: Available
     FE-->>User: Display "Available"
 ```
 
