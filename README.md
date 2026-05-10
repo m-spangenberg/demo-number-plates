@@ -301,15 +301,15 @@ curl \
     http://localhost:8081/graphql
 
 # {
-# "data": {
-# "lookupPlate": {
-# "available": true,
-# "input": "s3cr3t",
-# "normalized": "S3CR3T NA",
-# "suggestions": [],
-# "type": "vanity"
-# }
-# }
+#     "data": {
+#         "lookupPlate": {
+#             "available": true,
+#             "input": "s3cr3t",
+#             "normalized": "S3CR3T NA",
+#             "suggestions": [],
+#             "type": "vanity"
+#         }
+#     }
 # }
 ```
 
@@ -333,4 +333,37 @@ To remove the PostgreSQL and Redis volumes as well:
 
 ```bash
 docker compose down -v
+```
+
+## Benchmarking
+
+The repo includes a benchmark harness in `./benchmark` that constrains the stack to a production-like shape and generates a Markdown summary for each run.
+
+### Benchmark Profile
+
+The benchmark compose override applies these limits:
+
+- `go-api`: `1 vCPU`, `512MB RAM`
+- `postgres`: `1 vCPU`, `1GB RAM`
+- `redis`: `0.5 vCPU`, `256MB RAM`
+
+It also increases the API key rate limit during benchmark runs so the limiter does not dominate the results.
+
+### Benchmark Scenarios
+
+- `mixed`: realistic mixed workload of REST and GraphQL requests
+- `rest-standard`: REST standard plate lookups
+- `rest-vanity`: REST vanity plate lookups
+- `graphql-standard`: GraphQL standard plate lookups
+
+### Run A Benchmark
+
+Default run: mixed workload, `30m`, `120 req/s`.
+
+```bash
+# Run a specific scenario with custom duration and rate:
+DURATION=15m RATE=100 PREALLOCATED_VUS=10 MAX_VUS=50 KEEP_STACK_UP=1 ./benchmark/run.sh mixed
+
+# Reuse an already running stack instead of recreating it:
+START_STACK=0 BASE_URL=http://localhost:8081 DURATION=15m RATE=500 PREALLOCATED_VUS=10 MAX_VUS=50 KEEP_STACK_UP=1 ./benchmark/run.sh mixed
 ```
