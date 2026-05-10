@@ -1,6 +1,6 @@
 module demo-number-plates/services/go-api
 
-go 1.23.0
+go 1.26.2
 
 require (
 	github.com/graphql-go/graphql v0.8.1
