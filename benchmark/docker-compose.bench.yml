@@ -1,0 +1,16 @@
+services:
+  go-api:
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      - API_KEYS=bench-key
+      - RATE_LIMIT_REQUESTS=100000000
+      - RATE_LIMIT_WINDOW=1m
+
+  postgres:
+    cpus: 1.0
+    mem_limit: 1g
+
+  redis:
+    cpus: 0.5
+    mem_limit: 256m
