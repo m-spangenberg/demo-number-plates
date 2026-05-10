@@ -14,40 +14,32 @@ sequenceDiagram
     participant REST as REST API
     participant GQL as GraphQL API
 
-    Note over User, GQL: Search Attempt 1: Standard Plate via REST
+    Note over User, GQL: Search Attempt 1: Standard Plate
     User->>FE: Enters "N 818-818 W"
     rect rgb(240, 240, 240)
         Note right of FE: Sanitise Input
     end
-    FE->>REST: GET /find?t=std&q=818818
-    REST-->>FE: JSON Response: Not Available
-    FE-->>User: Display "Not Available"
-
-    Note over User, GQL: Search Attempt 2: Standard Plate via GraphQL
-    User->>FE: Enters "N 818-818 W"
-    rect rgb(240, 240, 240)
-        Note right of FE: Sanitise Input
+    alt Query via REST
+        FE->>REST: GET /find?t=std&q=818818W
+        REST-->>FE: JSON Response: Not Available
+    else Query via GraphQL
+        FE->>GQL: query { lookupPlate(type: "std", query: "818818W") }
+        GQL-->>FE: GraphQL Response: Not Available
     end
-    FE->>GQL: query { lookupPlate(type: "std", query: "818818W") }
-    GQL-->>FE: GraphQL Response: Not Available
     FE-->>User: Display "Not Available"
 
-    Note over User, GQL: Search Attempt 3: Vanity Plate via REST
+    Note over User, GQL: Search Attempt 2: Vanity Plate
     User->>FE: Enters "JEFFREY NA"
     rect rgb(240, 240, 240)
         Note right of FE: Sanitise Input
     end
-    FE->>REST: GET /find?t=vty&q=jeffrey
-    REST-->>FE: JSON Response: Available
-    FE-->>User: Display "Available"
-
-    Note over User, GQL: Search Attempt 4: Vanity Plate via GraphQL
-    User->>FE: Enters "JEFFREY NA"
-    rect rgb(240, 240, 240)
-        Note right of FE: Sanitise Input
+    alt Query via REST
+        FE->>REST: GET /find?t=vty&q=jeffrey
+        REST-->>FE: JSON Response: Available
+    else Query via GraphQL
+        FE->>GQL: query { lookupPlate(type: "vty", query: "jeffrey") }
+        GQL-->>FE: GraphQL Response: Available
     end
-    FE->>GQL: query { lookupPlate(type: "vty", query: "jeffrey") }
-    GQL-->>FE: GraphQL Response: Available
     FE-->>User: Display "Available"
 ```
 
